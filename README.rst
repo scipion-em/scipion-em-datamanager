@@ -5,6 +5,7 @@ Scipion Data Manager
 This project is a Scipion plugin to make depositions or retrieve data to/from several data portals:
 
 - CryoEM Workflow Viewer: http://nolan.cnb.csic.es/cryoemworkflowviewer
+- Onedata (using the https://cryo-em-docs.readthedocs.io/en/latest/user/download_all.html script developed by Masaryk University)
 
 =====
 Setup
@@ -41,3 +42,4 @@ You will need to use `Scipion3 <https://scipion-em.github.io/docs/docs/scipion
 2.  Extra steps:
 
 - If you want to make depositions to http://nolan.cnb.csic.es/cryoemworkflowviewer, you must register there first and obtain an API token.
+

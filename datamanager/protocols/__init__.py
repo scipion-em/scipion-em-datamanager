@@ -25,3 +25,4 @@
 # **************************************************************************
 
 from .protocol_cryoemworkflowviewer_submission import CryoEMWorkflowViewerDepositor
+from .protocol_onedata_download import OnedataDownloader
