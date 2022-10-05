@@ -42,6 +42,7 @@ import requests
 class CryoEMWorkflowViewerDepositor(EMProtocol):
     """
     Deposits Scipion workflows to CryoEM Workflow Viewer.
+    By using it you allow your workflow and thumnbails to be uploaded to a machine hosted in the Spanish National Centre for Biotechnology (CNB).
     """
     _label = 'CryoEM Workflow Viewer deposition'
     _ih = emlib.image.ImageHandler()
