@@ -103,8 +103,8 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
     def makeDepositionStep(self):
         workflow = open(self._getExtraPath(self.OUTPUT_WORKFLOW), 'rb')
         thumbnails = open(self._getExtraPath(pwutils.replaceBaseExt(self.DIR_IMAGES, 'zip')), 'rb')
-        url = 'http://nolan.cnb.csic.es/cryoemworkflowviewer/uploaddata/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, '/' + str(self.entryid) if self.update else '')
-        response = requests.post(url, files={'workflow': ('workflow.json', workflow), 'thumbnails': ('images_representation.zip', thumbnails)})
+        url = 'https://nolan.cnb.csic.es/cryoemworkflowviewer/uploaddata/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, '/' + str(self.entryid) if self.update else '')
+        response = requests.post(url, files={'workflow': ('workflow.json', workflow), 'thumbnails': ('images_representation.zip', thumbnails)}, verify=False)
 
         self.response.set(str(response.text))
         self._store()
