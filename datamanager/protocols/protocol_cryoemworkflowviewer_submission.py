@@ -29,7 +29,7 @@ import json
 import re
 from pwem import emlib, Domain
 from pwem.protocols import EMProtocol
-from pwem.objects import Class2D, Class3D, Image, CTFModel, Volume, Micrograph, Movie, Particle, SetOfCoordinates
+from pwem.objects import (Class2D, Class3D, Image, CTFModel, Volume, Micrograph, Movie, Particle, SetOfCoordinates, SetOfCTF, SetOfMicrographs, SetOfVolumes)
 from pyworkflow.protocol import params
 from pyworkflow.object import String, Set
 import pyworkflow.utils as pwutils
@@ -38,6 +38,11 @@ from PIL import Image as ImagePIL
 from PIL import ImageDraw
 from zipfile import ZipFile, ZIP_DEFLATED
 import requests
+import numpy as np
+import shutil
+import emtable as md
+from math import sqrt
+from pwem.viewers import EmPlotter
 
 class CryoEMWorkflowViewerDepositor(EMProtocol):
     """
@@ -142,19 +147,21 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
 
     # -------------------- UTILS functions -------------------------
 
+    def getTopLevelPath(self, *paths):
+        return self._getExtraPath(*paths)
+
+    def getProjectPath(self, *paths):
+        return self.getProject().getPath(*paths)
+
     def exportWorkflow(self):
         project = self.getProject()
-        workflowProts = [p for p in project.getRuns()]
+        workflowProts = project.getRuns()
 
-        for step in workflowProts:
-            if self._label in step.__dict__['_objLabel']:
-                workflowProts.remove(step)
-
-        workflowJsonPath = self._getExtraPath(self.OUTPUT_WORKFLOW)
+        workflowJsonPath = self.getProjectPath(self.getTopLevelPath(self.OUTPUT_WORKFLOW))
         protDicts = project.getProtocolsDict(workflowProts)
 
         # labels and colors
-        settingsPath = os.path.join(project.path, project.settingsPath)
+        settingsPath = self.getProjectPath(project.settingsPath)
         settings = config.ProjectSettings.load(settingsPath)
         labels = settings.getLabels()
         labelsDict = {}
@@ -173,50 +180,61 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
 
         # Add extra info to protocosDict
         for prot in workflowProts:
+            objId = prot.getObjId()
             # Get summary and add input and output information
             summary = prot.summary()
-            for a, input in prot.iterInputAttributes():
-                if input.isPointer():
+            for a, item in prot.iterInputAttributes():
+                if item.isPointer():
                     try:
-                        inputLabel = ' (from %s) ' % protDicts[int(input.getUniqueId().split('.')[0])]['object.label']
+                        inputLabel = protDicts[int(item.getUniqueId().split('.')[0])]['object.label']
+                        inputLabel = f" (from {inputLabel}) "
                     except:
                         inputLabel = ''
-                summary.append('Input: %s%s- %s\n' % (input.getUniqueId() if input.isPointer() else input.getObjName(), inputLabel, str(input.get())))
+                itemName = item.getUniqueId() if item.isPointer() else item.getObjName()
+                summary.append(f"Input: {itemName}{inputLabel} - {str(item.get())}")
 
-            protDicts[prot.getObjId()]['output'] = []
-            num = 0
+            protDicts[objId]['output'] = []
+
             for a, output in prot.iterOutputAttributes():
-                print('output key is %s' % a)
-                protDicts[prot.getObjId()]['output'].append(self.getOutputDict(output))
-                summary.append('Output: %s - %s\n' % (output.getObjName(), str(output)))
+                protDicts[objId]['output'].append(self.getOutputDict(output))
+                summary.append(f"Output: {output.getObjName()} - {str(output)}")
 
-            protDicts[prot.getObjId()]['summary'] = ''.join(summary)
+            protDicts[objId]['summary'] = '\n'.join(summary)
+
+            # additional plots
+            additionalPlots = self.getAdditionalPlots(prot)
+            for plotName, plotPath in additionalPlots.items():
+                protDicts[objId]['output'].append({self.OUTPUT_NAME: plotName,
+                                                   self.OUTPUT_ITEMS: [{self.ITEM_REPRESENTATION: plotPath}]})
+
 
             # Get log (stdout)
             outputs = []
-            logs = list(prot.getLogPaths())
-            if pwutils.exists(logs[0]):
-                logPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s.log' % (prot.getObjId(), prot.getClassName()))
-                pwutils.copyFile(logs[0], logPath)
+            stdout = prot.getStdoutLog()
+            if pwutils.exists(stdout):
+                logPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                               "%s_%s.log" % (objId, prot.getClassName()))
+                pwutils.copyFile(stdout, logPath)
                 outputs = logPath
 
-            protDicts[prot.getObjId()]['log'] =  outputs
+            protDicts[objId]['log'] = outputs
 
             # labels
-            if prot.getObjId() in protsLabelsDict.keys():
-                protDicts[prot.getObjId()]['label'] = protsLabelsDict[prot.getObjId()]
-                protDicts[prot.getObjId()]['labelColor'] = []
-                for label in protDicts[prot.getObjId()]['label']:
-                    protDicts[prot.getObjId()]['labelColor'].append(labelsDict[label])
+            if objId in protsLabelsDict.keys():
+                protDicts[objId]['label'] = protsLabelsDict[objId]
+                protDicts[objId]['labelColor'] = []
+                for label in protDicts[objId]['label']:
+                    protDicts[objId]['labelColor'].append(labelsDict[label])
 
             # Get plugin and binary version
-            protDicts[prot.getObjId()]['plugin'] = prot.getClassPackageName()
-            if len(outputs) > 0:
-                with open(logPath) as log:
-                    for line in log:
-                        if re.search(r'plugin v', line):
-                            version = line.split(':')[1].replace(' ', '').replace('\n', '')
-                            protDicts[prot.getObjId()]['pluginVersion'] = version
+            try:
+                protDicts[objId]['plugin'] = prot.getPlugin().getName()
+                package = self.getClassPackage()
+                if hasattr(package, "__version__"):
+                    protDicts[objId]['pluginVersion'] = package.__version__
+                protDicts[objId]['pluginBinaryVersion'] = prot.getPlugin().getActiveVersion()
+            except:
+                pass
 
         with open(workflowJsonPath, 'w') as f:
             f.write(json.dumps(list(protDicts.values()), indent=4, separators=(',', ': ')))
@@ -225,10 +243,10 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
 
     def getOutputDict(self, output):
         self.outputName = output.getObjName()
-        outputDict = {}
-        outputDict[self.OUTPUT_NAME] = output.getObjName()
-        outputDict[self.OUTPUT_TYPE] = output.getClassName()
-
+        outputDict = {
+            self.OUTPUT_NAME: output.getObjName(),
+            self.OUTPUT_TYPE: output.getClassName()
+        }
         items = []
 
         # If output is a Set get a list with all items
@@ -237,25 +255,24 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
             count = 0
             if isinstance(output, SetOfCoordinates):
                 coordinatesDict = {}
-                for micrograph in output.getMicrographs(): # get the first three micrographs
+                for micrograph in output.getMicrographs():  # get the first three micrographs
+                    micFn = micrograph.getFileName()
                     count += 1
-                    # apply a low pass filter
-                    args = ' -i %s -o %s --fourier low_pass %f' % (micrograph.getLocation()[1], self._getTmpPath(os.path.basename(micrograph.getFileName())), 0.05)
-                    getEnviron = Domain.importFromPlugin('xmipp3', 'Plugin', doRaise=True).getEnviron
-                    self.runJob('xmipp_transform_filter', args, env=getEnviron())
-                    # save jpg
-                    repPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s' % (self.outputName, pwutils.replaceBaseExt(micrograph.getFileName(), 'jpg')))
-                    self._ih.convert(self._getTmpPath(os.path.basename(micrograph.getFileName())), repPath)
-                    coordinatesDict[micrograph.getMicName()] = {'path': repPath, 'Xdim': micrograph.getXDim(), 'Ydim': micrograph.getYDim()}
+                    repPath = self.getTopLevelPath(self.DIR_IMAGES, '%s_%s' % (
+                        self.outputName, pwutils.replaceBaseExt(micFn, 'jpg')))
+                    self.createThumbnail(micFn, repPath, type=Micrograph)
+                    coordinatesDict[micrograph.getMicName()] = {'path': repPath,
+                                                                'Xdim': micrograph.getXDim(),
+                                                                'Ydim': micrograph.getYDim()}
 
                     items.append({self.ITEM_REPRESENTATION: repPath})
-                    if count == 3: break;
+                    if count == 3: break
 
-                for coordinate in output: # for each micrograph, get its coordinates
+                for coordinate in output:  #  for each micrograph, get its coordinates
                     if coordinate.getMicName() in coordinatesDict:
                         coordinatesDict[coordinate.getMicName()].setdefault('coords', []).append([coordinate.getX(), coordinate.getY()])
 
-                for micrograph, values in coordinatesDict.items(): # draw coordinates in micrographs jpgs
+                for micrograph, values in coordinatesDict.items():  # draw coordinates in micrographs jpgs
                     if 'coords' in values:
                         image = ImagePIL.open(values['path']).convert('RGB')
                         W_mic = values['Xdim']
@@ -271,12 +288,12 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
 
             else:
                 for item in output.iterItems():
-                    itemDict = self.getItemDict(item)
-                    items.append(itemDict)
                     count += 1
+                    itemDict = self.getItemDict(item, count)
+                    items.append(itemDict)
                     # In some types get only a limited number of items
-                    if (isinstance(item, Micrograph) or isinstance(item, Movie) or isinstance(item, CTFModel)) and count == 3: break;
-                    if isinstance(item, Particle) and count == 15: break;
+                    if (isinstance(item, Micrograph) or isinstance(item, Movie) or isinstance(item, CTFModel)) and count == 3: break
+                    if isinstance(item, Particle) and count == 15: break
 
         # If it is a single object then only one item is present
         else:
@@ -286,26 +303,24 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
 
         return outputDict
 
-    def getItemDict(self, item):
-        itemDict = {}
+    def getItemDict(self, item, count=None):
         attributes = item.getAttributes()
-        for key, value in attributes:
-            # Skip attributes that are Pointer
-            if not value.isPointer():
-                itemDict[key] = str(value)
-
+        # Skip attributes that are Pointer
+        itemDict = {k: str(v) for k, v in attributes if not v.isPointer()}
         itemDict[self.ITEM_ID] = item.getObjId()
 
         try:
             # Get item representation
             if isinstance(item, Class2D):
                 # use representative as item representation
-                repPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s_%s' % (self.outputName, item.getRepresentative().getIndex(), pwutils.replaceBaseExt(item.getRepresentative().getFileName(), 'jpg')))
-                itemPath = item.getRepresentative().getLocation()
-                self._ih.convert(itemPath, repPath)
+                rep = item.getRepresentative()
+                repPath = self.getTopLevelPath(self.DIR_IMAGES, '%s_%s_%s' % (
+                    self.outputName, rep.getIndex(),
+                    pwutils.replaceBaseExt(rep.getFileName(), 'jpg')))
+                self._ih.convert(rep.getLocation(), self.getProjectPath(repPath))
 
                 if '_size' in itemDict:  # write number of particles over the class
-                    text = itemDict['_size'] + ' ptcls'
+                    text = itemDict['_size'] + " ptcls"
                     image = ImagePIL.open(repPath).convert('RGB')
                     W, H = image.size
                     draw = ImageDraw.Draw(image)
@@ -315,77 +330,228 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
                 itemDict[self.ITEM_REPRESENTATION] = repPath
 
             elif isinstance(item, Class3D):
+                itemFn = item.getFileName()
                 # Get all slices in x,y and z directions of representative to represent the class
-                repDir = self._getExtraPath(self.DIR_IMAGES, '%s_%s' % (self.outputName, pwutils.removeBaseExt(item.getRepresentative().getFileName())))
+                rep = item.getRepresentative()
+                repDir = self.getTopLevelPath(self.DIR_IMAGES,
+                                              '%s_%s' % (self.outputName,
+                                                         pwutils.removeBaseExt(rep.getFileName())))
                 pwutils.makePath(repDir)
-                if item.getFileName().endswith('.mrc'):
-                    item.setFileName(item.getFileName() + ':mrc')
-                I = emlib.Image(item.getRepresentative().getFileName())
-                I.writeSlices(os.path.join(repDir, 'slicesX'), 'jpg', 'X')
-                I.writeSlices(os.path.join(repDir, 'slicesY'), 'jpg', 'Y')
-                I.writeSlices(os.path.join(repDir, 'slicesZ'), 'jpg', 'Z')
+                if itemFn.endswith('.mrc'):
+                    item.setFileName(itemFn + ':mrc')
+                V = emlib.Image(rep.getFileName()).getData()
+                self.writeSlices(V, os.path.join(repDir, 'slicesX'), 'X')
+                self.writeSlices(V, os.path.join(repDir, 'slicesY'), 'Y')
+                self.writeSlices(V, os.path.join(repDir, 'slicesZ'), 'Z')
 
-                if '_size' in itemDict: # write number of particles over a class image
-                    text = itemDict['_size'] + ' ptcls'
+                if '_size' in itemDict:  # write number of particles over a class image
+                    text = itemDict['_size'] + " ptcls"
                     image = ImagePIL.open(os.path.join(repDir, 'slicesX_0000.jpg')).convert('RGB')
                     W, H = image.size
                     draw = ImageDraw.Draw(image)
                     draw.text((5, H - 15), text, fill=(0, 255, 0))
                     image.save(os.path.join(repDir, 'slicesX_0000.jpg'), quality=95)
 
-                itemDict[self.ITEM_REPRESENTATION] = repDir
+                itemDict[self.ITEM_REPRESENTATION] = [os.path.join(repDir, file) for file in sorted(os.listdir(repDir))]
 
             elif isinstance(item, Volume):
-                # Get all slices in x,y and z directions to represent the volume
-                repDir = self._getExtraPath(self.DIR_IMAGES, '%s_%s' % (self.outputName, pwutils.removeBaseExt(item.getFileName())))
-                pwutils.makePath(repDir)
-                if item.getFileName().endswith('.mrc'):
-                    item.setFileName(item.getFileName() + ':mrc')
-                I = emlib.Image(item.getFileName())
-                I.writeSlices(os.path.join(repDir,'slicesX'), 'jpg', 'X')
-                I.writeSlices(os.path.join(repDir, 'slicesY'), 'jpg', 'Y')
-                I.writeSlices(os.path.join(repDir, 'slicesZ'), 'jpg', 'Z')
+                itemFn = item.getFileName()
+                # if is a .vol volume, convert to .mrc
+                if itemFn.endswith(".vol"):
+                    repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                                   f"{self.outputName}_{pwutils.removeBaseExt(itemFn)}.mrc")
+                    self._ih.convert(itemFn, self.getProjectPath(repPath))
 
-                itemDict[self.ITEM_REPRESENTATION] = repDir
+                # Get all slices in x,y and z directions to represent the volume
+                repDir = self.getTopLevelPath(self.DIR_IMAGES,
+                                              f"{self.outputName}_{pwutils.removeBaseExt(itemFn)}")
+                pwutils.makePath(repDir)
+                if itemFn.endswith('.mrc'):
+                    item.setFileName(itemFn + ':mrc')
+                V = emlib.Image(itemFn).getData()
+                self.writeSlices(V, os.path.join(repDir, 'slicesX'), 'X')
+                self.writeSlices(V, os.path.join(repDir, 'slicesY'), 'Y')
+                self.writeSlices(V, os.path.join(repDir, 'slicesZ'), 'Z')
+
+                itemDict[self.ITEM_REPRESENTATION] = [os.path.join(repDir, file) for file in sorted(os.listdir(repDir))]
 
             elif isinstance(item, Image):
+                itemFn = item.getFileName()
                 # use Location as item representation
-                repPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s_%s' % (self.outputName, item.getIndex(), pwutils.replaceBaseExt(item.getFileName(), 'jpg')))
-                itemPath = item.getLocation()
-                # apply a low pass filter
-                if item.getFileName().endswith('.stk'):
-                    self._ih.convert(itemPath[1], repPath)
-                else:
-                    args = ' -i %s -o %s --fourier low_pass %f' % (itemPath[1], self._getTmpPath(os.path.basename(item.getFileName())), 0.05)
-                    getEnviron = Domain.importFromPlugin('xmipp3', 'Plugin', doRaise=True).getEnviron
-                    self.runJob('xmipp_transform_filter', args, env=getEnviron())
-                    self._ih.convert(self._getTmpPath(os.path.basename(item.getFileName())), repPath)
+                repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                               '%s_%s_%s' % (self.outputName,
+                                                             item.getIndex(),
+                                                             pwutils.replaceBaseExt(itemFn, 'jpg')))
+                self.createThumbnail(itemFn, repPath,
+                                     Micrograph if isinstance(item, Micrograph) else Particle if isinstance(item, Particle) else None,
+                                     count)
                 itemDict[self.ITEM_REPRESENTATION] = repPath
 
             elif isinstance(item, CTFModel):
                 # if exists use ctfmodel_quadrant as item representation, in other case use psdFile
                 if item.hasAttribute('_xmipp_ctfmodel_quadrant'):
-                    repPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s' % (self.outputName, pwutils.replaceBaseExt(str(item._xmipp_ctfmodel_quadrant), 'jpg')))
                     itemPath = str(item._xmipp_ctfmodel_quadrant)
+                    repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                                   '%s_%s' % (self.outputName,
+                                                              pwutils.replaceBaseExt(itemPath, 'jpg')))
 
+                    self._ih.convert(itemPath, self.getProjectPath(repPath))
                 else:
-                    repPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s' % (self.outputName, pwutils.replaceBaseExt(item.getPsdFile(), 'jpg')))
                     itemPath = item.getPsdFile()
+                    repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                                   '%s_%s' % (self.outputName,
+                                                              pwutils.replaceBaseExt(itemPath, 'jpg')))
 
-                self._ih.convert(itemPath, repPath)
+                    image = emlib.Image(itemPath)
+                    data = image.getData()
+
+                    GAMMA = 2.2 # apply a gamma correction
+                    data = data ** (1/GAMMA)
+                    data = np.fft.fftshift(data)
+
+                    image.setData(data)
+                    image.write(repPath)
+
                 itemDict[self.ITEM_REPRESENTATION] = repPath
 
             else:
                 # in any other case look for a representation on attributes
                 for key, value in attributes:
-                    if os.path.exists(str(value)):
-                        repPath = self._getExtraPath(self.DIR_IMAGES, '%s_%s' % (self.outputName, pwutils.replaceBaseExt(str(value), 'png')))
-                        itemPath = str(value)
-                        self._ih.convert(itemPath, repPath)
+                    itemPath = str(value)
+                    if os.path.exists(itemPath):
+                        repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                                       '%s_%s' % (self.outputName,
+                                                                  pwutils.replaceBaseExt(itemPath, 'png')))
+                        self._ih.convert(itemPath, self.getProjectPath(repPath))
                         itemDict[self.ITEM_REPRESENTATION] = repPath
                         break
 
         except Exception as e:
-            print('Cannot obtain item representation for %s' % str(item))
+            self.error(f"Cannot obtain item representation for {str(item)}: {e}")
 
         return itemDict
+
+    def createThumbnail(self, inputFn, outputFn, type, count=None):
+        """ Apply a low pass filter and make a jpg thumbnail. """
+        outputFn = self.getProjectPath(outputFn)
+        # if inputFn.endswith('.stk'):
+        #     self._ih.convert(inputFn, outputFn)
+        x, y, z, n = self._ih.getDimensions(inputFn)
+        getEnviron = Domain.importFromPlugin('xmipp3', 'Plugin', doRaise=True).getEnviron
+        if type == Particle:
+            args = f" -i {inputFn if n == 1 else f'{count}@{inputFn}'} -o {outputFn}"
+            self.runJob('xmipp_image_convert', args, env=getEnviron())
+        elif type == Micrograph:
+            args = f" -i {inputFn if n == 1 else f'{count}@{inputFn}'} -o {outputFn} --fourier low_pass 0.05"
+            self.runJob('xmipp_transform_filter', args, env=getEnviron())
+
+    def getAdditionalPlots(self, prot):
+        """ Generate additional plots apart from basic thumbnails. """
+        def getMRCVolume(output, outputName):
+            itemFn = output.getFileName()
+            if itemFn.endswith('mrc'):
+                itemFn = itemFn.replace(':mrc', '')
+                repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                               f"{outputName}_{pwutils.removeBaseExt(itemFn)}.mrc")
+                shutil.copy(itemFn, repPath)
+            if itemFn.endswith('.map'):
+                repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                               f"{outputName}_{pwutils.removeBaseExt(itemFn)}.map")
+                shutil.copy(itemFn, repPath)
+            if itemFn.endswith('.vol'): # already copied (because it was previously converted to mrc)
+                repPath = self.getTopLevelPath(self.DIR_IMAGES,
+                                               f"{outputName}_{pwutils.removeBaseExt(itemFn)}.mrc")
+            return f"{outputName}_{pwutils.removeBaseExt(itemFn)}_3D", repPath
+
+        plotPaths = {}
+        for a, output in prot.iterOutputAttributes():
+            # alignment methods
+            if isinstance(output, SetOfMicrographs):
+                shiftsX, shiftsY, totalShifts = [], [], []
+                for item in output.iterItems():
+                    # XmippProtFlexAlign, XmippProtMovieMaxShift...
+                    if item.hasAttribute('_xmipp_ShiftX') and item.hasAttribute('_xmipp_ShiftY'):
+                        shiftsX = [float(x) for x in item.getAttributeValue('_xmipp_ShiftX').split(',')]
+                        shiftsY = [float(y) for y in item.getAttributeValue('_xmipp_ShiftY').split(',')]
+
+                    # ProtRelionMotioncor
+                    elif os.path.exists(os.path.join(prot._getExtraPath(), pwutils.replaceBaseExt(item.getMicName(), 'star'))):
+                        starFile = os.path.join(prot._getExtraPath(), pwutils.replaceBaseExt(item.getMicName(), 'star'))
+                        table = md.Table(fileName=starFile, tableName='global_shift')
+
+                        for i, row in enumerate(table):
+                            shiftsX.append(float(row.rlnMicrographShiftX))
+                            shiftsY.append(float(row.rlnMicrographShiftY))
+
+                    if len(shiftsX) > 0 and len(shiftsY) > 0:
+                        # relative shifts
+                        relativeShiftsX = [shiftsX[i] - shiftsX[i-1] for i in range(1, len(shiftsX))]
+                        relativeShiftsY = [shiftsY[i] - shiftsY[i-1] for i in range(1, len(shiftsY))]
+
+                        totalShifts.append(sqrt(sum((x**2 + y**2) for x, y in zip(relativeShiftsX, relativeShiftsY))))
+
+                        numberOfBins = 10
+                        plotterShifts = EmPlotter()
+                        plotterShifts.createSubPlot("Total shifts histogram", "Drift (pixels)", "#")
+                        plotterShifts.plotHist(totalShifts, nbins=numberOfBins)
+                        repPath = self.getTopLevelPath(self.DIR_IMAGES, f'{output.getObjName()}_shifts_histogram.jpg')
+                        plotterShifts.savefig(os.path.join(self.getProject().path, repPath))
+                        plotterShifts.close()
+                        plotPaths[f'{output.getObjName()}_shifts_histogram'] = repPath
+
+            # CTF methods
+            if isinstance(output, SetOfCTF):
+                defocusU = [ctf.getDefocusU() for ctf in output]
+                defocusV = [ctf.getDefocusV() for ctf in output]
+                defocus = [(defU + defV)/2 for defU, defV in zip(defocusU, defocusV)]
+                astigmatism = [abs(defU - defV)/2 for defU, defV in zip(defocusU, defocusV)]
+
+                numberOfBins = 10
+                plotterDefocus = EmPlotter()
+                plotterAstigmatism = EmPlotter()
+
+                plotterDefocus.createSubPlot("Defocus histogram", "Defocus (A)", "#")
+                plotterDefocus.plotHist(defocus, nbins=numberOfBins)
+                repPath = self.getTopLevelPath(self.DIR_IMAGES, f'{output.getObjName()}_defocus_histogram.jpg')
+                plotterDefocus.savefig(os.path.join(self.getProject().path, repPath))
+                plotterDefocus.close()
+                plotPaths[f'{output.getObjName()}_defocus_histogram'] = repPath
+
+                plotterAstigmatism.createSubPlot("Astigmatism histogram", "Astigmatism (A)", "#")
+                plotterAstigmatism.plotHist(astigmatism, nbins=numberOfBins)
+                repPath = self.getTopLevelPath(self.DIR_IMAGES, f'{output.getObjName()}_defocus_astigmatism.jpg')
+                plotterAstigmatism.savefig(os.path.join(self.getProject().path, repPath))
+                plotterAstigmatism.close()
+                plotPaths[f'{output.getObjName()}_defocus_astigmatism.jpg'] = repPath
+
+            # Volumes
+            if isinstance(output, Volume):
+                name, repPath = getMRCVolume(output, output.getObjName())
+                plotPaths[name] = repPath
+
+            elif isinstance(output, SetOfVolumes):
+                for item in output.iterItems():
+                    name, repPath = getMRCVolume(item, output.getObjName())
+                    plotPaths[name] = repPath
+
+        return plotPaths
+
+    def writeSlices(self, V, fnRoot, direction):
+        """ Generate volume slices for x, y and z axis. """
+        V = np.squeeze(V) # for volumes with numpy arrays with 4 dims
+        m = np.min(V)
+        M = np.max(V)
+        V = (V - m) / (M - m) * 255
+        Zdim, Ydim, Xdim = V.shape
+        if direction == 'X':
+            for j in range(Xdim):
+                I = ImagePIL.fromarray(np.reshape(V[:, :, j], [Zdim, Ydim]).astype(np.uint8))
+                I.save(f'{fnRoot}_{"{:04d}".format(j)}.jpg')
+        if direction == 'Y':
+            for i in range(Ydim):
+                I = ImagePIL.fromarray(np.reshape(V[:, i, :], [Zdim, Xdim]).astype(np.uint8))
+                I.save(f'{fnRoot}_{"{:04d}".format(i)}.jpg')
+        if direction == 'Z':
+            for k in range(Zdim):
+                I = ImagePIL.fromarray(np.reshape(V[k, :, :], [Ydim, Xdim]).astype(np.uint8))
+                I.save(f'{fnRoot}_{"{:04d}".format(k)}.jpg')
