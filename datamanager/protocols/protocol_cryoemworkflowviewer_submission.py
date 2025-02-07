@@ -156,6 +156,7 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
     def exportWorkflow(self):
         project = self.getProject()
         workflowProts = project.getRuns()
+        workflowProts = [prot for prot in workflowProts if prot.getObjId() != self.getObjId()]  # remove current protocol
 
         workflowJsonPath = self.getProjectPath(self.getTopLevelPath(self.OUTPUT_WORKFLOW))
         protDicts = project.getProtocolsDict(workflowProts)
