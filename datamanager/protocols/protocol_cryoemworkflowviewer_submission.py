@@ -72,15 +72,15 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
     def _defineParams(self, form):
         form.addSection(label='Entry')
         form.addParam('apitoken', params.StringParam, label='API Token',
-                      help='You can generate an API Token after registering at http://nolan.cnb.csic.es/cryoemworkflowviewer/')
+                      help='You can generate an API Token after registering at https://scipion.i2pc.es/cryoemworkflowviewer/')
         form.addParam('update', params.BooleanParam, label='Update existing entry?', default=False,
                       help='Is this an update of a previous deposition?')
         form.addParam('entryid', params.StringParam, label='Entry ID to update', condition='update',
-                      help='Specify the ID of the existing entry you want to update. If you do not remember it, check it at http://nolan.cnb.csic.es/cryoemworkflowviewer/profile')
+                      help='Specify the ID of the existing entry you want to update. If you do not remember it, check it at https://scipion.i2pc.es/cryoemworkflowviewer/profile')
         form.addParam('entrytitle', params.StringParam, label='Entry title',
                       help='Specify a descriptive entry title')
         form.addParam('public', params.BooleanParam, label='Make entry public?', default=False,
-                      help='Do you want the entry be publicly visible at http://nolan.cnb.csic.es/cryoemworkflowviewer/entries ?')
+                      help='Do you want the entry be publicly visible at https://scipion.i2pc.es/cryoemworkflowviewer/public_entries ?')
 
     # --------------- INSERT steps functions ----------------
 
@@ -108,7 +108,7 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
     def makeDepositionStep(self):
         workflow = open(self._getExtraPath(self.OUTPUT_WORKFLOW), 'rb')
         thumbnails = open(self._getExtraPath(pwutils.replaceBaseExt(self.DIR_IMAGES, 'zip')), 'rb')
-        url = 'https://nolan.cnb.csic.es/cryoemworkflowviewer/uploaddata/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, '/' + str(self.entryid) if self.update else '')
+        url = 'https://scipion.i2pc.es/cryoemworkflowviewer/uploaddata/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, '/' + str(self.entryid) if self.update else '')
         response = requests.post(url, files={'workflow': ('workflow.json', workflow), 'thumbnails': ('images_representation.zip', thumbnails)}, verify=False)
 
         self.response.set(str(response.text))
@@ -123,11 +123,11 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
     def _validate(self):
         errors = []
         if self.apitoken == '':
-            errors.append('You have to provide an API Token (yo can get one at http://nolan.cnb.csic.es/cryoemworkflowviewer/profile )')
+            errors.append('You have to provide an API Token (yo can get one at https://scipion.i2pc.es/cryoemworkflowviewer/profile )')
         if self.entrytitle == '':
             errors.append('You have to provide a title for the entry')
         if self.update and self.entryid == '':
-            errors.append('You have to provide the ID of the entry you want to update. If you do not remember it, check it at http://nolan.cnb.csic.es/cryoemworkflowviewer/profile')
+            errors.append('You have to provide the ID of the entry you want to update. If you do not remember it, check it at https://scipion.i2pc.es/cryoemworkflowviewer/profile')
         return errors
 
     def _citations(self):
