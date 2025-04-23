@@ -43,6 +43,7 @@ import shutil
 import emtable as md
 from math import sqrt
 from pwem.viewers import EmPlotter
+from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 class CryoEMWorkflowViewerDepositor(EMProtocol):
     """
@@ -109,7 +110,11 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
         workflow = open(self._getExtraPath(self.OUTPUT_WORKFLOW), 'rb')
         thumbnails = open(self._getExtraPath(pwutils.replaceBaseExt(self.DIR_IMAGES, 'zip')), 'rb')
         url = 'https://scipion.i2pc.es/cryoemworkflowviewer/uploaddata/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, '/' + str(self.entryid) if self.update else '')
-        response = requests.post(url, files={'workflow': ('workflow.json', workflow), 'thumbnails': ('images_representation.zip', thumbnails)}, verify=False)
+
+        data = MultipartEncoder(fields = {'workflow': ('workflow.json', workflow, 'application/json'),
+                                          'thumbnails': ('images_representation.zip', thumbnails, 'application/zip')})
+
+        response = requests.post(url, data=data, headers={'Content-Type': data.content_type}, verify=False)
 
         self.response.set(str(response.text))
         self._store()

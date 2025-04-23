@@ -19,6 +19,9 @@ here = path.abspath(path.dirname(__file__))
 with open(path.join(here, 'README.rst'), encoding='utf-8') as f:
     long_description = f.read()
 
+with open('requirements.txt') as f:
+    requirements = f.read().splitlines()
+
 setup(
     name='scipion-em-datamanager',
     version=__version__,
@@ -29,7 +32,7 @@ setup(
     author_email='scipion@cnb.csic.es',
     keywords='scipion datamanager scipion-3.0',
     packages=find_packages(),
-    install_requires=['scipion-em'],
+    install_requires=[requirements],
     package_data={
        'datamanager': ['protocols.conf']
     },
