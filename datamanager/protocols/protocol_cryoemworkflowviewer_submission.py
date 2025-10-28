@@ -80,6 +80,8 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
                       help='Specify the ID of the existing entry you want to update. If you do not remember it, check it at https://scipion.i2pc.es/cryoemworkflowviewer/profile')
         form.addParam('entrytitle', params.StringParam, label='Entry title',
                       help='Specify a descriptive entry title')
+        form.addParam('entrydescription', params.TextParam, label='Entry description',
+                      help='Specify a description for the entry')
         form.addParam('public', params.BooleanParam, label='Make entry public?', default=False,
                       help='Do you want the entry be publicly visible at https://scipion.i2pc.es/cryoemworkflowviewer/public_entries ?')
 
@@ -109,7 +111,7 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
     def makeDepositionStep(self):
         workflow = open(self._getExtraPath(self.OUTPUT_WORKFLOW), 'rb')
         thumbnails = open(self._getExtraPath(pwutils.replaceBaseExt(self.DIR_IMAGES, 'zip')), 'rb')
-        url = 'https://scipion.i2pc.es/cryoemworkflowviewer/uploaddata/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, '/' + str(self.entryid) if self.update else '')
+        url = 'https://scipion.i2pc.es/cryoemworkflowviewer/uploaddata/%s/%s/%s/%s%s' % (self.apitoken, '1' if self.public else '0', self.entrytitle, self.entrydescription, '/' + str(self.entryid) if self.update else '')
 
         data = MultipartEncoder(fields = {'workflow': ('workflow.json', workflow, 'application/json'),
                                           'thumbnails': ('images_representation.zip', thumbnails, 'application/zip')})
@@ -131,6 +133,8 @@ class CryoEMWorkflowViewerDepositor(EMProtocol):
             errors.append('You have to provide an API Token (yo can get one at https://scipion.i2pc.es/cryoemworkflowviewer/profile )')
         if self.entrytitle == '':
             errors.append('You have to provide a title for the entry')
+        if self.entrydescription == '':
+            errors.append('You have to provide a description for the entry')
         if self.update and self.entryid == '':
             errors.append('You have to provide the ID of the entry you want to update. If you do not remember it, check it at https://scipion.i2pc.es/cryoemworkflowviewer/profile')
         return errors
