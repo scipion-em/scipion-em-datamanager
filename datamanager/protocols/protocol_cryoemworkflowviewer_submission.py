@@ -47,8 +47,166 @@ from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 class CryoEMWorkflowViewerDepositor(EMProtocol):
     """
-    Deposits Scipion workflows to CryoEM Workflow Viewer.
-    By using it you allow your workflow and thumnbails to be uploaded to a machine hosted in the Spanish National Centre for Biotechnology (CNB).
+    Deposits Scipion workflows to the CryoEM Workflow Viewer platform, allowing
+    complete cryo-EM processing pipelines together with representative visual
+    material to be archived, shared, and visualized through a centralized web
+    service hosted at the Spanish National Centre for Biotechnology. The protocol
+    is intended to simplify workflow dissemination, reproducibility, and
+    collaborative review by packaging workflow structure, metadata, intermediate
+    results, and graphical summaries into a portable online representation.
+
+    AI Generated:
+
+    CryoEM Workflow Viewer Depositor (CryoEMWorkflowViewerDepositor) - User Manual
+        Overview
+
+        The CryoEM Workflow Viewer Depositor protocol is designed to publish
+        Scipion cryo-EM workflows to an online visualization platform where
+        complete processing histories can be explored interactively. Its main
+        objective is to facilitate reproducibility, communication, and sharing
+        of cryo-EM projects by transforming a local Scipion workflow into a
+        structured online entry containing protocols, outputs, visual previews,
+        processing summaries, and associated metadata.
+
+        In practical cryo-EM environments, workflows often involve many
+        interconnected protocols that generate large collections of intermediate
+        and final results. Sharing these workflows manually can become difficult,
+        especially when collaborators need to inspect particle sets, maps,
+        classifications, motion correction outputs, or CTF estimations. This
+        protocol addresses that limitation by automatically preparing a visual
+        representation of the workflow that can be uploaded and browsed remotely.
+
+        Biological and Collaborative Context
+
+        Modern cryo-EM projects are highly iterative and frequently involve
+        collaboration between laboratories, facilities, and computational teams.
+        Publishing workflows in a structured online format helps preserve the
+        scientific context of a reconstruction, including how maps were obtained,
+        refined, classified, or validated. This is especially important for
+        reproducibility studies, training activities, facility reporting, and
+        long-term project documentation.
+
+        For biological users, the protocol provides an accessible way to review
+        the evolution of a dataset from raw micrographs to final structures. It
+        also allows collaborators to inspect representative outputs visually
+        without requiring direct access to the original Scipion project or large
+        raw datasets.
+
+        Entry Creation and Metadata
+
+        Each deposition corresponds to a workflow entry that includes a title,
+        descriptive text, and visibility settings. The title should clearly
+        identify the biological system, experimental condition, or reconstruction
+        strategy being presented. The description is particularly important
+        because it provides the scientific interpretation of the workflow and
+        helps external users understand the goals and conclusions of the project.
+
+        The protocol supports both private and public entries. Public entries can
+        be explored by external users through the workflow viewer portal, making
+        them useful for publications, educational material, or community
+        resources. Private entries are more appropriate during active development
+        or collaborative review before public dissemination.
+
+        Existing entries can also be updated. This is valuable when workflows
+        evolve over time, for example after additional refinement, improved
+        particle selection, or new classification strategies. Updating an entry
+        preserves continuity while allowing the online representation to remain
+        synchronized with the latest project state.
+
+        Workflow Export and Organization
+
+        The protocol generates a structured representation of the entire Scipion
+        workflow, including protocol relationships, input and output objects,
+        execution summaries, labels, logs, and plugin information. This produces
+        a coherent overview of the processing pipeline rather than an isolated
+        snapshot of individual results.
+
+        Outputs from protocols are analyzed and converted into visual
+        representations suitable for online browsing. Depending on the type of
+        object, these representations may include image thumbnails, volume
+        slices, class averages, coordinate overlays, histograms, or power
+        spectra. The resulting collection provides a biologically meaningful
+        summary of the workflow that can be interpreted visually by users without
+        specialized local software.
+
+        Representation of Cryo-EM Data
+
+        Different cryo-EM object types are represented differently to maximize
+        interpretability. Two-dimensional classes are shown using representative
+        averages, which help users quickly evaluate particle quality,
+        heterogeneity, or classification success. Three-dimensional maps are
+        represented through orthogonal slices, allowing rapid inspection of map
+        quality and structural organization.
+
+        Micrographs and particles are displayed as thumbnails to provide visual
+        context while reducing storage and transfer requirements. Coordinate sets
+        may include overlays that highlight particle picking positions directly
+        on representative micrographs, helping users assess picking quality and
+        particle distribution.
+
+        CTF estimations are represented using power spectra or fitted diagnostic
+        images, enabling visual inspection of defocus estimation quality and
+        astigmatism behavior. Histograms summarizing defocus and astigmatism
+        distributions are also generated to provide an overview of dataset
+        consistency.
+
+        Motion Correction and Quality Metrics
+
+        For workflows involving movie alignment or motion correction, the
+        protocol can generate drift and shift histograms that summarize specimen
+        motion across the dataset. These visual diagnostics are important because
+        excessive drift often correlates with reduced high-resolution signal and
+        may indicate problematic acquisitions.
+
+        Such summaries are especially valuable when workflows are reviewed by
+        collaborators or facility staff who need to assess dataset quality
+        rapidly. Instead of opening raw alignment files manually, users can
+        inspect graphical summaries directly through the workflow viewer.
+
+        Logs, Labels, and Provenance
+
+        In addition to scientific outputs, the protocol preserves execution
+        provenance. Protocol logs, labels, plugin versions, and software metadata
+        are incorporated into the deposition whenever available. This contextual
+        information is essential for reproducibility because cryo-EM results are
+        often sensitive to software versions, parameter choices, and processing
+        strategies.
+
+        Labels and workflow annotations help organize complex pipelines and make
+        navigation easier in large projects. For example, users may visually
+        distinguish preprocessing, classification, refinement, and validation
+        stages within the deposited workflow.
+
+        Practical Recommendations
+
+        Before deposition, it is advisable to review workflow organization and
+        protocol annotations to ensure that the online representation remains
+        understandable to external users. Meaningful protocol labels, concise
+        descriptions, and well-structured workflows substantially improve the
+        clarity of the deposited entry.
+
+        Public deposition is particularly useful for workflows associated with
+        publications, tutorials, facility reports, or collaborative projects.
+        However, users should verify that no confidential information or
+        unpublished sensitive material is included before making entries public.
+
+        Since visual summaries are generated automatically, workflows containing
+        representative outputs and clean protocol organization generally produce
+        the most informative online presentations. Extremely heterogeneous or
+        partially incomplete workflows may still be deposited, but their online
+        interpretation may require additional explanation in the entry
+        description.
+
+        Final Perspective
+
+        The CryoEM Workflow Viewer Depositor protocol transforms a local Scipion
+        workflow into a shareable scientific resource that combines provenance,
+        visualization, and processing history in a unified online environment.
+        Beyond simple archival purposes, it supports transparency,
+        reproducibility, collaborative interpretation, and educational use within
+        the cryo-EM community. By integrating workflow structure with visual
+        summaries and metadata, the protocol helps preserve not only the final
+        reconstruction but also the scientific pathway that produced it.
     """
     _label = 'CryoEM Workflow Viewer deposition'
     _ih = emlib.image.ImageHandler()
